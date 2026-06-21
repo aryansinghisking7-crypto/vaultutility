@@ -1,12 +1,28 @@
 import discord
-from discord.ext import commands, tasks
+from discord.ext import commands
 import qrcode
 import io
 import requests
 import os
+from threading import Thread
+from flask import Flask
+
+# ====== KEEP ALIVE WEB SERVER FOR RENDER FREE ======
+app = Flask('')
+
+@app.route('/')
+def home():
+    return "Zyro Bot is running!"
+
+def run():
+    app.run(host='0.0.0.0', port=8080)
+
+def keep_alive():
+    t = Thread(target=run)
+    t.start()
 
 # ====== CONFIG ======
-DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")  # Reads from Render env vars
+DISCORD_TOKEN = os.getenv("DISCORD_TOKEN") # Set this in Render Environment Variables
 PREFIX = "$"
 
 # Storage - resets on restart. Use a DB later if you need persistence
@@ -33,7 +49,7 @@ async def on_command_error(ctx, error):
     elif isinstance(error, commands.BadArgument):
         await ctx.send("Invalid argument. Tag a user or use a valid ID/number.")
     elif isinstance(error, commands.CommandNotFound):
-        pass  # ignore unknown commands
+        pass
     else:
         print(f"Error: {error}")
 
@@ -53,13 +69,13 @@ async def upi(ctx):
     if not user_data["upi_id"]:
         await ctx.send("No UPI ID set. Use `$setupi yourupi@bank` first.")
         return
-    
+
     upi_string = f"upi://pay?pa={user_data['upi_id']}&pn=Payment"
     qr = qrcode.make(upi_string)
     buffer = io.BytesIO()
     qr.save(buffer, format="PNG")
     buffer.seek(0)
-    
+
     embed = discord.Embed(title="Scan to Pay", description=f"UPI ID: `{user_data['upi_id']}`", color=0x5865F2)
     file = discord.File(buffer, filename="upi_qr.png")
     embed.set_image(url="attachment://upi_qr.png")
@@ -97,7 +113,7 @@ async def checkbalance(ctx, address: str):
         if "error" in r:
             await ctx.send("Invalid address or API error ❌")
             return
-        balance = r["balance"] / 100000000  # satoshi to LTC
+        balance = r["balance"] / 100000000 # satoshi to LTC
         embed = discord.Embed(title="LTC Balance", color=0x345D9D)
         embed.add_field(name="Address", value=f"`{address}`", inline=False)
         embed.add_field(name="Balance", value=f"`{balance:.8f} LTC`", inline=False)
@@ -159,4 +175,6 @@ async def on_ready():
     print(f"Logged in as {bot.user}")
     await bot.change_presence(activity=discord.Game(name=f"{PREFIX}help"))
 
+# Start web server + bot
+keep_alive()
 bot.run(DISCORD_TOKEN)
