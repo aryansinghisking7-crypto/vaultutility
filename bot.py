@@ -1,180 +1,169 @@
 import discord
 from discord.ext import commands
-import qrcode
-import io
-import requests
-import os
-from threading import Thread
+from discord import app_commands
+import qrcode, io, requests, os
 from flask import Flask
+from threading import Thread
 
-# ====== KEEP ALIVE WEB SERVER FOR RENDER FREE ======
-app = Flask('')
-
-@app.route('/')
-def home():
-    return "Zyro Bot is running!"
-
-def run():
-    app.run(host='0.0.0.0', port=8080)
-
-def keep_alive():
-    t = Thread(target=run)
-    t.start()
-
-# ====== CONFIG ======
-DISCORD_TOKEN = os.getenv("DISCORD_TOKEN") # Set this in Render Environment Variables
-PREFIX = "$"
-
-# Storage - resets on restart. Use a DB later if you need persistence
-user_data = {
-    "upi_id": None,
-    "ltc_address": None
-}
-
-# ====== BOT SETUP ======
+# --- Bot Setup ---
 intents = discord.Intents.default()
 intents.message_content = True
-intents.members = True
-bot = commands.Bot(command_prefix=PREFIX, intents=intents, help_command=None)
+intents.members = True  # Needed for kick/ban
+bot = commands.Bot(command_prefix='$', intents=intents)
 
-# ====== COOLDOWN ERROR HANDLER ======
-@bot.event
-async def on_command_error(ctx, error):
-    if isinstance(error, commands.CommandOnCooldown):
-        await ctx.send(f"Slow down bro 💀 Try again in {error.retry_after:.1f}s", delete_after=3)
-    elif isinstance(error, commands.MissingPermissions):
-        await ctx.send("You don't have perms for that ❌", delete_after=5)
-    elif isinstance(error, commands.MissingRequiredArgument):
-        await ctx.send(f"Missing argument. Usage: `{PREFIX}{ctx.command} {ctx.command.signature}`")
-    elif isinstance(error, commands.BadArgument):
-        await ctx.send("Invalid argument. Tag a user or use a valid ID/number.")
-    elif isinstance(error, commands.CommandNotFound):
-        pass
-    else:
-        print(f"Error: {error}")
+# --- Keep alive for Render ---
+app = Flask('')
+@app.route('/')
+def home(): return "Zyro is alive!"
+def run(): app.run(host='0.0.0.0', port=8080)
+Thread(target=run).start()
+# -----------------------------
 
-# ====== UPI COMMANDS ======
-@bot.command()
-@commands.cooldown(1, 5, commands.BucketType.user)
-async def setupi(ctx, *, upi_id: str):
-    """Set UPI ID. Usage: $setupi yourupi@bank"""
-    user_data["upi_id"] = upi_id
-    embed = discord.Embed(title="UPI ID Saved ✅", description=f"UPI set to: `{upi_id}`", color=0x00ff00)
-    await ctx.send(embed=embed)
+# --- Storage ---
+user_data = {}  # {user_id: {"upi": "xxx@bank", "ltc": "address"}}
 
-@bot.command()
-@commands.cooldown(1, 5, commands.BucketType.user)
-async def upi(ctx):
-    """Show UPI with QR. Usage: $upi"""
-    if not user_data["upi_id"]:
-        await ctx.send("No UPI ID set. Use `$setupi yourupi@bank` first.")
-        return
+# --- Helper Functions ---
+def get_upi(user_id):
+    return user_data.get(user_id, {}).get("upi")
 
-    upi_string = f"upi://pay?pa={user_data['upi_id']}&pn=Payment"
-    qr = qrcode.make(upi_string)
+def get_ltc(user_id):
+    return user_data.get(user_id, {}).get("ltc")
+
+async def send_qr(interaction_or_ctx, data, title, filename):
+    qr = qrcode.QRCode(version=1, box_size=10, border=5)
+    qr.add_data(data)
+    qr.make(fit=True)
+    img = qr.make_image(fill_color="black", back_color="white")
+    
     buffer = io.BytesIO()
-    qr.save(buffer, format="PNG")
+    img.save(buffer, format='PNG')
     buffer.seek(0)
+    
+    file = discord.File(buffer, filename=filename)
+    embed = discord.Embed(title=title, color=0x00ff00)
+    embed.set_image(url=f"attachment://{filename}")
+    
+    if isinstance(interaction_or_ctx, discord.Interaction):
+        await interaction_or_ctx.response.send_message(embed=embed, file=file)
+    else:
+        await interaction_or_ctx.send(embed=embed, file=file)
 
-    embed = discord.Embed(title="Scan to Pay", description=f"UPI ID: `{user_data['upi_id']}`", color=0x5865F2)
-    file = discord.File(buffer, filename="upi_qr.png")
-    embed.set_image(url="attachment://upi_qr.png")
-    await ctx.send(embed=embed, file=file)
-
-# ====== LTC COMMANDS ======
-@bot.command()
-@commands.cooldown(1, 5, commands.BucketType.user)
-async def setltc(ctx, *, address: str):
-    """Set LTC address. Usage: $setltc Laddress"""
-    if not (address.startswith("L") or address.startswith("M") or address.startswith("ltc1")):
-        await ctx.send("That doesn't look like a valid LTC address ❌")
-        return
-    user_data["ltc_address"] = address
-    embed = discord.Embed(title="LTC Address Saved ✅", description=f"LTC set to: `{address}`", color=0x00ff00)
-    await ctx.send(embed=embed)
-
-@bot.command()
-@commands.cooldown(1, 5, commands.BucketType.user)
-async def ltc(ctx):
-    """Show saved LTC address. Usage: $ltc"""
-    if not user_data["ltc_address"]:
-        await ctx.send("No LTC address set. Use `$setltc Laddress` first.")
-        return
-    embed = discord.Embed(title="LTC Address", description=f"`{user_data['ltc_address']}`", color=0x345D9D)
-    await ctx.send(embed=embed)
-
-@bot.command()
-@commands.cooldown(1, 5, commands.BucketType.user)
-async def checkbalance(ctx, address: str):
-    """Check LTC balance of any address. Usage: $checkbalance Laddress"""
-    try:
-        url = f"https://api.blockcypher.com/v1/ltc/main/addrs/{address}/balance"
-        r = requests.get(url, timeout=5).json()
-        if "error" in r:
-            await ctx.send("Invalid address or API error ❌")
-            return
-        balance = r["balance"] / 100000000 # satoshi to LTC
-        embed = discord.Embed(title="LTC Balance", color=0x345D9D)
-        embed.add_field(name="Address", value=f"`{address}`", inline=False)
-        embed.add_field(name="Balance", value=f"`{balance:.8f} LTC`", inline=False)
-        await ctx.send(embed=embed)
-    except Exception as e:
-        await ctx.send("API error or timeout. Try again later.")
-        print(e)
-
-# ====== MOD COMMANDS ======
-@bot.command()
-@commands.has_permissions(manage_messages=True)
-@commands.cooldown(1, 5, commands.BucketType.user)
-async def purge(ctx, amount: int):
-    """Delete messages. Usage: $purge 10"""
-    if amount > 100:
-        await ctx.send("Max 100 messages at once.")
-        return
-    deleted = await ctx.channel.purge(limit=amount + 1)
-    await ctx.send(f"Deleted {len(deleted)-1} messages ✅", delete_after=3)
-
-@bot.command()
-@commands.has_permissions(kick_members=True)
-@commands.cooldown(1, 5, commands.BucketType.user)
-async def kick(ctx, member: discord.Member, *, reason="No reason provided"):
-    """Kick a member. Usage: $kick @user reason"""
-    await member.kick(reason=reason)
-    embed = discord.Embed(title="Member Kicked", description=f"{member.mention} was kicked.\nReason: {reason}", color=0xff0000)
-    await ctx.send(embed=embed)
-
-@bot.command()
-@commands.has_permissions(ban_members=True)
-@commands.cooldown(1, 5, commands.BucketType.user)
-async def ban(ctx, member: discord.Member, *, reason="No reason provided"):
-    """Ban a member. Usage: $ban @user reason"""
-    await member.ban(reason=reason)
-    embed = discord.Embed(title="Member Banned", description=f"{member.mention} was banned.\nReason: {reason}", color=0xff0000)
-    await ctx.send(embed=embed)
-
-# ====== UTILITY ======
-@bot.command()
-@commands.cooldown(1, 5, commands.BucketType.user)
-async def ping(ctx):
-    """Check bot latency. Usage: $ping"""
-    await ctx.send(f"Pong! `{round(bot.latency * 1000)}ms`")
-
-@bot.command()
-@commands.cooldown(1, 5, commands.BucketType.user)
-async def help(ctx):
-    """Show all commands. Usage: $help"""
-    embed = discord.Embed(title="Zyro Utility Commands", color=0x5865F2)
-    embed.add_field(name="💸 Payments", value="`$setupi`, `$upi`, `$setltc`, `$ltc`, `$checkbalance`", inline=False)
-    embed.add_field(name="🔨 Moderation", value="`$purge`, `$kick`, `$ban`", inline=False)
-    embed.add_field(name="⚙️ Utility", value="`$ping`, `$help`", inline=False)
-    embed.set_footer(text="All commands have 5s cooldown")
-    await ctx.send(embed=embed)
-
+# --- Events ---
 @bot.event
 async def on_ready():
-    print(f"Logged in as {bot.user}")
-    await bot.change_presence(activity=discord.Game(name=f"{PREFIX}help"))
+    print(f'Zyro Bot is running! Logged in as {bot.user}')
+    try:
+        synced = await bot.tree.sync()
+        print(f'Synced {len(synced)} slash commands')
+    except Exception as e:
+        print(f"Failed to sync commands: {e}")
 
-# Start web server + bot
-keep_alive()
-bot.run(DISCORD_TOKEN)
+# --- UPI Commands ---
+@bot.hybrid_command(name="setupi", description="Set your UPI ID")
+@app_commands.describe(upi_id="Your UPI ID like name@bank")
+async def setupi(ctx, upi_id: str):
+    user_id = ctx.author.id if isinstance(ctx, commands.Context) else ctx.user.id
+    if user_id not in user_data:
+        user_data[user_id] = {}
+    user_data[user_id]["upi"] = upi_id
+    
+    msg = f"UPI ID set to `{upi_id}` ✅"
+    if isinstance(ctx, commands.Context):
+        await ctx.send(msg)
+    else:
+        await ctx.response.send_message(msg, ephemeral=True)
+
+@bot.hybrid_command(name="upi", description="Generate UPI QR for payment")
+@app_commands.describe(amount="Amount in INR", note="Payment note/reason")
+async def upi(ctx, amount: float, *, note: str = "Payment"):
+    user_id = ctx.author.id if isinstance(ctx, commands.Context) else ctx.user.id
+    upi_id = get_upi(user_id)
+    
+    if not upi_id:
+        msg = "You haven't set your UPI ID yet! Use `/setupi` or `$setupi yourupi@bank`"
+        if isinstance(ctx, commands.Context):
+            await ctx.send(msg)
+        else:
+            await ctx.response.send_message(msg, ephemeral=True)
+        return
+    
+    upi_string = f"upi://pay?pa={upi_id}&pn=User&am={amount}&tn={note}"
+    await send_qr(ctx, upi_string, f"UPI Payment - ₹{amount}", "upi_qr.png")
+
+# --- LTC Commands ---
+@bot.hybrid_command(name="setltc", description="Set your LTC wallet address")
+@app_commands.describe(address="Your LTC wallet address")
+async def setltc(ctx, address: str):
+    user_id = ctx.author.id if isinstance(ctx, commands.Context) else ctx.user.id
+    if user_id not in user_data:
+        user_data[user_id] = {}
+    user_data[user_id]["ltc"] = address
+    
+    msg = f"LTC address set ✅"
+    if isinstance(ctx, commands.Context):
+        await ctx.send(msg)
+    else:
+        await ctx.response.send_message(msg, ephemeral=True)
+
+@bot.hybrid_command(name="ltc", description="Generate LTC QR for payment")
+@app_commands.describe(amount="Amount in LTC", note="Payment note")
+async def ltc(ctx, amount: float, *, note: str = "Payment"):
+    user_id = ctx.author.id if isinstance(ctx, commands.Context) else ctx.user.id
+    ltc_address = get_ltc(user_id)
+    
+    if not ltc_address:
+        msg = "You haven't set your LTC address yet! Use `/setltc` or `$setltc address`"
+        if isinstance(ctx, commands.Context):
+            await ctx.send(msg)
+        else:
+            await ctx.response.send_message(msg, ephemeral=True)
+        return
+    
+    ltc_string = f"litecoin:{ltc_address}?amount={amount}&message={note}"
+    await send_qr(ctx, ltc_string, f"LTC Payment - {amount} LTC", "ltc_qr.png")
+
+@bot.hybrid_command(name="checkbalance", description="Check LTC wallet balance")
+async def checkbalance(ctx):
+    user_id = ctx.author.id if isinstance(ctx, commands.Context) else ctx.user.id
+    ltc_address = get_ltc(user_id)
+    
+    if not ltc_address:
+        msg = "You haven't set your LTC address yet! Use `/setltc` or `$setltc address`"
+        if isinstance(ctx, commands.Context):
+            await ctx.send(msg)
+        else:
+            await ctx.response.send_message(msg, ephemeral=True)
+        return
+    
+    try:
+        response = requests.get(f"https://api.blockcypher.com/v1/ltc/main/addrs/{ltc_address}/balance", timeout=10)
+        data = response.json()
+        balance = data.get('balance', 0) / 100000000  # Convert from litoshis to LTC
+        
+        embed = discord.Embed(title="LTC Wallet Balance", color=0x345D9D)
+        embed.add_field(name="Address", value=f"`{ltc_address}`", inline=False)
+        embed.add_field(name="Balance", value=f"`{balance:.8f} LTC`", inline=False)
+        
+        if isinstance(ctx, commands.Context):
+            await ctx.send(embed=embed)
+        else:
+            await ctx.response.send_message(embed=embed)
+    except Exception as e:
+        msg = f"Error fetching balance: {str(e)}"
+        if isinstance(ctx, commands.Context):
+            await ctx.send(msg)
+        else:
+            await ctx.response.send_message(msg, ephemeral=True)
+
+# --- Utility Commands ---
+@bot.hybrid_command(name="ping", description="Check bot latency")
+async def ping(ctx):
+    latency = round(bot.latency * 1000)
+    msg = f"Pong! 🏓 `{latency}ms`"
+    if isinstance(ctx, commands.Context):
+        await ctx.send(msg)
+    else:
+        await ctx.response.send_message(msg)
+
+@bot.hybrid_command(name="help", description="Show all commands")
+async def help_cmd
