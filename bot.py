@@ -166,4 +166,67 @@ async def ping(ctx):
         await ctx.response.send_message(msg)
 
 @bot.hybrid_command(name="help", description="Show all commands")
-async def help_cmd
+async def help_cmd(ctx):  # <- FIXED: Added (ctx) here
+    embed = discord.Embed(title="Zyro Bot Commands", color=0x00ff00)
+    embed.add_field(name="💸 Payment", value="`/upi <amount> ` - Generate UPI QR\n`/setupi <upi_id>` - Set UPI ID\n`/ltc <amount> ` - Generate LTC QR\n`/setltc <address>` - Set LTC address\n`/checkbalance` - Check LTC balance", inline=False)
+    embed.add_field(name="🛠️ Moderation", value="`/kick <user> [reason]` - Kick user\n`/ban <user> [reason]` - Ban user\n`/purge <amount>` - Delete messages", inline=False)
+    embed.add_field(name="⚙️ Utility", value="`/ping` - Check latency\n`/help` - Show this menu", inline=False)
+    embed.set_footer(text="Works with $ prefix too! Example: $upi 100")
+    
+    if isinstance(ctx, commands.Context):
+        await ctx.send(embed=embed)
+    else:
+        await ctx.response.send_message(embed=embed)
+
+# --- Moderation Commands [Guild Only] ---
+@bot.hybrid_command(name="kick", description="Kick a user from the server")
+@app_commands.describe(user="User to kick", reason="Reason for kick")
+@app_commands.checks.has_permissions(kick_members=True)
+async def kick(ctx, user: discord.Member, *, reason: str = "No reason provided"):
+    if isinstance(ctx, discord.Interaction):
+        if not ctx.guild:
+            await ctx.response.send_message("This command only works in servers!", ephemeral=True)
+            return
+        await user.kick(reason=reason)
+        await ctx.response.send_message(f"Kicked {user.mention} | Reason: {reason}")
+    else:
+        if not ctx.guild:
+            await ctx.send("This command only works in servers!")
+            return
+        await user.kick(reason=reason)
+        await ctx.send(f"Kicked {user.mention} | Reason: {reason}")
+
+@kick.error
+async def kick_error(ctx, error):
+    if isinstance(error, app_commands.errors.MissingPermissions):
+        msg = "You don't have permission to kick members!"
+    else:
+        msg = f"Error: {str(error)}"
+    
+    if isinstance(ctx, discord.Interaction):
+        await ctx.response.send_message(msg, ephemeral=True)
+    else:
+        await ctx.send(msg)
+
+@bot.hybrid_command(name="ban", description="Ban a user from the server")
+@app_commands.describe(user="User to ban", reason="Reason for ban")
+@app_commands.checks.has_permissions(ban_members=True)
+async def ban(ctx, user: discord.Member, *, reason: str = "No reason provided"):
+    if isinstance(ctx, discord.Interaction):
+        if not ctx.guild:
+            await ctx.response.send_message("This command only works in servers!", ephemeral=True)
+            return
+        await user.ban(reason=reason)
+        await ctx.response.send_message(f"Banned {user.mention} | Reason: {reason}")
+    else:
+        if not ctx.guild:
+            await ctx.send("This command only works in servers!")
+            return
+        await user.ban(reason=reason)
+        await ctx.send(f"Banned {user.mention} | Reason: {reason}")
+
+@ban.error
+async def ban_error(ctx, error):
+    if isinstance(error, app_commands.errors.MissingPermissions):
+        msg = "You don't have permission to ban members!"
+    else
