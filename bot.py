@@ -175,29 +175,26 @@ async def help_cmd(ctx):
 @bot.hybrid_command(name="bolbro", description="Spam a message 10 times")
 @app_commands.describe(message="Message to spam")
 async def bolbro(ctx, *, message: str):
-    user = ctx.author if isinstance(ctx, commands.Context) else ctx.user
+    # In servers, require admin. In DMs, anyone can use it.
     if ctx.guild:
+        user = ctx.author if isinstance(ctx, commands.Context) else ctx.user
         if not user.guild_permissions.administrator:
-            msg = "You need Administrator permission to use this!"
+            msg = "You need Administrator permission to use this in servers!"
             if isinstance(ctx, discord.Interaction):
                 await ctx.response.send_message(msg, ephemeral=True)
             else:
                 await ctx.send(msg)
             return
-    else:
-        if user.id != OWNER_ID or OWNER_ID == 0:
-            msg = "You can't use this command in DMs!"
-            if isinstance(ctx, discord.Interaction):
-                await ctx.response.send_message(msg, ephemeral=True)
-            else:
-                await ctx.send(msg)
-            return
+    
+    # Send initial response
     if isinstance(ctx, discord.Interaction):
         await ctx.response.send_message("Spamming...", ephemeral=True)
         channel = ctx.channel
     else:
         await ctx.send("Spamming...")
         channel = ctx.channel
+    
+    # Spam 10 times
     for i in range(10):
         await channel.send(message)
         await asyncio.sleep(0.8)
@@ -345,7 +342,8 @@ app = Flask('')
 def home(): return "Zyro is alive!"
 def run_flask(): 
     print("BOOT: Flask thread starting")
-    app.run(host='0.0.0.0', port=8080)
+    port = int(os.environ.get('PORT', 8080))  # Fixed for Render
+    app.run(host='0.0.0.0', port=port)
 
 # --- Run Bot ---
 if __name__ == "__main__":
