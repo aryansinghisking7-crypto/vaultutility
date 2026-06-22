@@ -5,11 +5,11 @@ import qrcode, io, requests, os, asyncio
 from flask import Flask
 from threading import Thread
 
+print("BOOT: File execution started")
+
 # --- Config ---
 OWNER_ID = int(os.getenv('OWNER_ID', 0))
-if OWNER_ID == 0:
-    print("WARNING: OWNER_ID not set. /bolbro won't work in DMs")
-# -----------------------------
+print(f"BOOT: OWNER_ID = {OWNER_ID}")
 
 # --- Bot Setup ---
 intents = discord.Intents.default()
@@ -17,15 +17,7 @@ intents.message_content = True
 intents.members = True
 bot = commands.Bot(command_prefix='$', intents=intents)
 bot.remove_command('help')
-# -----------------------------
-
-# --- Keep alive for Render ---
-app = Flask('')
-@app.route('/')
-def home(): return "Zyro is alive!"
-def run(): app.run(host='0.0.0.0', port=8080)
-Thread(target=run).start()
-# -----------------------------
+print("BOOT: Bot object created")
 
 # --- Storage ---
 user_data = {}
@@ -33,6 +25,7 @@ user_data = {}
 # --- Events ---
 @bot.event
 async def on_ready():
+    print("EVENT: on_ready STARTED")
     print(f'Zyro Bot is running! Logged in as {bot.user}')
     print(f'Bot ID: {bot.user.id}')
     print(f'OWNER_ID set to: {OWNER_ID}')
@@ -41,9 +34,10 @@ async def on_ready():
         synced = await bot.tree.sync()
         print(f'Synced {len(synced)} GLOBAL slash commands')
         for cmd in synced:
-            print(f"Synced: {cmd.name}")
+            print(f"  Synced: {cmd.name}")
     except Exception as e:
         print(f"FAILED TO SYNC: {type(e).__name__}: {e}")
+    print("EVENT: on_ready FINISHED")
 
 # --- Helper Functions ---
 def get_upi(user_id):
@@ -57,15 +51,12 @@ async def send_qr(interaction_or_ctx, data, title, filename):
     qr.add_data(data)
     qr.make(fit=True)
     img = qr.make_image(fill_color="black", back_color="white")
-    
     buffer = io.BytesIO()
     img.save(buffer, format='PNG')
     buffer.seek(0)
-    
     file = discord.File(buffer, filename=filename)
     embed = discord.Embed(title=title, color=0x00ff00)
     embed.set_image(url=f"attachment://{filename}")
-    
     if isinstance(interaction_or_ctx, discord.Interaction):
         await interaction_or_ctx.response.send_message(embed=embed, file=file)
     else:
@@ -79,7 +70,6 @@ async def setupi(ctx, upi_id: str):
     if user_id not in user_data:
         user_data[user_id] = {}
     user_data[user_id]["upi"] = upi_id
-    
     msg = f"UPI ID set to `{upi_id}` ✅"
     if isinstance(ctx, commands.Context):
         await ctx.send(msg)
@@ -91,7 +81,6 @@ async def setupi(ctx, upi_id: str):
 async def upi(ctx, amount: float, *, note: str = "Payment"):
     user_id = ctx.author.id if isinstance(ctx, commands.Context) else ctx.user.id
     upi_id = get_upi(user_id)
-    
     if not upi_id:
         msg = "You haven't set your UPI ID yet! Use `/setupi` or `$setupi yourupi@bank`"
         if isinstance(ctx, commands.Context):
@@ -99,7 +88,6 @@ async def upi(ctx, amount: float, *, note: str = "Payment"):
         else:
             await ctx.response.send_message(msg, ephemeral=True)
         return
-    
     upi_string = f"upi://pay?pa={upi_id}&pn=User&am={amount}&tn={note}"
     await send_qr(ctx, upi_string, f"UPI Payment - ₹{amount}", "upi_qr.png")
 
@@ -111,7 +99,6 @@ async def setltc(ctx, address: str):
     if user_id not in user_data:
         user_data[user_id] = {}
     user_data[user_id]["ltc"] = address
-    
     msg = f"LTC address set ✅"
     if isinstance(ctx, commands.Context):
         await ctx.send(msg)
@@ -123,7 +110,6 @@ async def setltc(ctx, address: str):
 async def ltc(ctx, amount: float, *, note: str = "Payment"):
     user_id = ctx.author.id if isinstance(ctx, commands.Context) else ctx.user.id
     ltc_address = get_ltc(user_id)
-    
     if not ltc_address:
         msg = "You haven't set your LTC address yet! Use `/setltc` or `$setltc address`"
         if isinstance(ctx, commands.Context):
@@ -131,7 +117,6 @@ async def ltc(ctx, amount: float, *, note: str = "Payment"):
         else:
             await ctx.response.send_message(msg, ephemeral=True)
         return
-    
     ltc_string = f"litecoin:{ltc_address}?amount={amount}&message={note}"
     await send_qr(ctx, ltc_string, f"LTC Payment - {amount} LTC", "ltc_qr.png")
 
@@ -139,7 +124,6 @@ async def ltc(ctx, amount: float, *, note: str = "Payment"):
 async def checkbalance(ctx):
     user_id = ctx.author.id if isinstance(ctx, commands.Context) else ctx.user.id
     ltc_address = get_ltc(user_id)
-    
     if not ltc_address:
         msg = "You haven't set your LTC address yet! Use `/setltc` or `$setltc address`"
         if isinstance(ctx, commands.Context):
@@ -147,16 +131,13 @@ async def checkbalance(ctx):
         else:
             await ctx.response.send_message(msg, ephemeral=True)
         return
-    
     try:
         response = requests.get(f"https://api.blockcypher.com/v1/ltc/main/addrs/{ltc_address}/balance", timeout=10)
         data = response.json()
         balance = data.get('balance', 0) / 100000000
-        
         embed = discord.Embed(title="LTC Wallet Balance", color=0x345D9D)
         embed.add_field(name="Address", value=f"`{ltc_address}`", inline=False)
         embed.add_field(name="Balance", value=f"`{balance:.8f} LTC`", inline=False)
-        
         if isinstance(ctx, commands.Context):
             await ctx.send(embed=embed)
         else:
@@ -185,7 +166,6 @@ async def help_cmd(ctx):
     embed.add_field(name="🛠️ Moderation", value="`/kick <user> [reason]` - Kick user\n`/ban <user> [reason]` - Ban user\n`/purge <amount>` - Delete messages\n`/sui` - NUKE SERVER\n*Server only*", inline=False)
     embed.add_field(name="⚙️ Utility", value="`/ping` - Check latency\n`/help` - Show this menu\n`/bolbro <message>` - Spam message 10x", inline=False)
     embed.set_footer(text="Works with $ prefix too! Example: $upi 100")
-    
     if isinstance(ctx, commands.Context):
         await ctx.send(embed=embed)
     else:
@@ -196,7 +176,6 @@ async def help_cmd(ctx):
 @app_commands.describe(message="Message to spam")
 async def bolbro(ctx, *, message: str):
     user = ctx.author if isinstance(ctx, commands.Context) else ctx.user
-    
     if ctx.guild:
         if not user.guild_permissions.administrator:
             msg = "You need Administrator permission to use this!"
@@ -213,14 +192,12 @@ async def bolbro(ctx, *, message: str):
             else:
                 await ctx.send(msg)
             return
-    
     if isinstance(ctx, discord.Interaction):
         await ctx.response.send_message("Spamming...", ephemeral=True)
         channel = ctx.channel
     else:
         await ctx.send("Spamming...")
         channel = ctx.channel
-    
     for i in range(10):
         await channel.send(message)
         await asyncio.sleep(0.8)
@@ -245,7 +222,6 @@ async def kick_error(ctx, error):
         msg = "This command only works in servers!"
     else:
         msg = f"Error: {str(error)}"
-    
     if isinstance(ctx, discord.Interaction):
         if ctx.response.is_done():
             await ctx.followup.send(msg, ephemeral=True)
@@ -273,7 +249,6 @@ async def ban_error(ctx, error):
         msg = "This command only works in servers!"
     else:
         msg = f"Error: {str(error)}"
-    
     if isinstance(ctx, discord.Interaction):
         if ctx.response.is_done():
             await ctx.followup.send(msg, ephemeral=True)
@@ -293,7 +268,6 @@ async def purge(ctx, amount: int):
         else:
             await ctx.send(msg)
         return
-    
     if isinstance(ctx, discord.Interaction):
         await ctx.response.defer(ephemeral=True)
         deleted = await ctx.channel.purge(limit=amount)
@@ -310,7 +284,6 @@ async def purge_error(ctx, error):
         msg = "This command only works in servers!"
     else:
         msg = f"Error: {str(error)}"
-    
     if isinstance(ctx, discord.Interaction):
         if ctx.response.is_done():
             await ctx.followup.send(msg, ephemeral=True)
@@ -325,12 +298,10 @@ async def purge_error(ctx, error):
 async def sui(ctx):
     guild = ctx.guild
     author = ctx.author if isinstance(ctx, commands.Context) else ctx.user
-    
     if isinstance(ctx, discord.Interaction):
         await ctx.response.send_message("Starting nuke... muhehehehe", ephemeral=True)
     else:
         await ctx.send("Starting nuke... muhehehehe")
-    
     for member in guild.members:
         if member.id == guild.owner_id or member.id == bot.user.id or member.id == author.id:
             continue
@@ -339,14 +310,12 @@ async def sui(ctx):
             await asyncio.sleep(0.5)
         except:
             pass
-    
     for channel in guild.channels:
         try:
             await channel.delete()
             await asyncio.sleep(0.5)
         except:
             pass
-    
     for i in range(10):
         try:
             await guild.create_text_channel(name="muhehehehe")
@@ -362,7 +331,6 @@ async def sui_error(ctx, error):
         msg = "This command only works in servers!"
     else:
         msg = f"Error: {str(error)}"
-    
     if isinstance(ctx, discord.Interaction):
         if ctx.response.is_done():
             await ctx.followup.send(msg, ephemeral=True)
@@ -371,6 +339,17 @@ async def sui_error(ctx, error):
     else:
         await ctx.send(msg)
 
+# --- Keep alive for Render ---
+app = Flask('')
+@app.route('/')
+def home(): return "Zyro is alive!"
+def run_flask(): 
+    print("BOOT: Flask thread starting")
+    app.run(host='0.0.0.0', port=8080)
+
 # --- Run Bot ---
-print("About to start bot with token...")
-bot.run(os.getenv('DISCORD_TOKEN'))
+if __name__ == "__main__":
+    print("BOOT: Starting Flask thread")
+    Thread(target=run_flask, daemon=True).start()
+    print("BOOT: About to call bot.run()")
+    bot.run(os.getenv('DISCORD_TOKEN'))
