@@ -1,3 +1,14 @@
+# ===== PYTHON 3.13 AUDIO COMPATIBILITY PATCH =====
+import sys
+try:
+    import audioop
+except ModuleNotFoundError:
+    try:
+        import audioop_lts
+        sys.modules['audioop'] = audioop_lts
+    except ImportError:
+        pass  # Fallback if dependencies are still building
+
 import discord
 from discord.ext import commands
 from discord import app_commands
@@ -13,7 +24,7 @@ import json
 load_dotenv()
 TOKEN = os.getenv("DISCORD_TOKEN")
 
-# Flask keep-alive for Render
+# Flask keep-alive for Render/Railway
 app = Flask(__name__)
 @app.route('/')
 def home():
@@ -127,7 +138,7 @@ async def upi(ctx, amount: float, note: str = "Payment"):
         return
 
     upi_link = f"upi://pay?pa={upi_id}&pn=User&am={amount}&tn={note}&cu=INR"
-    qr_url = f"https://api.qrserver.com/v1/create-qr-code/?size=512x512&data={upi_link}"
+    qr_url = f"https://qrserver.com{upi_link}"
 
     embed = discord.Embed(
         title="💸 UPI Payment Request",
@@ -164,7 +175,7 @@ async def ltc(ctx, amount: float):
         return
 
     ltc_url = f"litecoin:{wallet}?amount={amount}"
-    qr_url = f"https://api.qrserver.com/v1/create-qr-code/?size=512x512&data={ltc_url}"
+    qr_url = f"https://qrserver.com{ltc_url}"
 
     embed = discord.Embed(
         title="💰 LTC Payment Request",
