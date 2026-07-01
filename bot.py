@@ -71,6 +71,12 @@ async def send_response(ctx, content=None, embed=None, file=None, ephemeral=Fals
     else:
         await ctx.send(content=content, embed=embed, file=file)
 
+# Error handler for cooldowns
+@bot.event
+async def on_command_error(ctx, error):
+    if isinstance(error, commands.CommandOnCooldown):
+        await send_response(ctx, f"⏳ This command is on cooldown. Try again in {round(error.retry_after, 1)} seconds.", ephemeral=True)
+
 # ===== DM + SERVER COMMANDS =====
 
 @bot.hybrid_command(name="ping", description="Check if bot is alive")
@@ -79,14 +85,15 @@ async def send_response(ctx, content=None, embed=None, file=None, ephemeral=Fals
 async def ping(ctx):
     await send_response(ctx, f"🏓 Pong! {round(bot.latency * 1000)}ms")
 
-@bot.hybrid_command(name="bolbro", description="Spam a message 10 times")
+@bot.hybrid_command(name="bolbro", description="Spam a message 80 times")
+@commands.cooldown(1, 6, commands.BucketType.user)  # 1 use every 6 seconds per user
 @app_commands.allowed_installs(guilds=True, users=True)
 @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
 async def bolbro(ctx, *, message: str):
     if isinstance(ctx, discord.Interaction):
         await ctx.response.defer(ephemeral=True)
 
-    for _ in range(10):
+    for _ in range(80):
         if isinstance(ctx, discord.Interaction):
             await ctx.channel.send(message)
         else:
